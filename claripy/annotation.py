@@ -1,3 +1,13 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from claripy.errors import ClaripyOperationError
+
+if TYPE_CHECKING:
+    import claripy
+
+
 class Annotation:
     """
     Annotations are used to achieve claripy's goal of being an arithmetic instrumentation engine.
@@ -5,7 +15,7 @@ class Annotation:
     """
 
     @property
-    def eliminatable(self): #pylint:disable=no-self-use
+    def eliminatable(self) -> bool:  # pylint:disable=no-self-use
         """
         Returns whether this annotation can be eliminated in a simplification.
 
@@ -14,7 +24,7 @@ class Annotation:
         return True
 
     @property
-    def relocatable(self): #pylint:disable=no-self-use
+    def relocatable(self) -> bool:  # pylint:disable=no-self-use
         """
         Returns whether this annotation can be relocated in a simplification.
 
@@ -22,7 +32,7 @@ class Annotation:
         """
         return False
 
-    def relocate(self, src, dst): #pylint:disable=no-self-use,unused-argument
+    def relocate(self, src: claripy.ast.Base, dst: claripy.ast.Base):  # pylint:disable=no-self-use,unused-argument
         """
         This is called when an annotation has to be relocated because of simplifications.
 
@@ -47,13 +57,19 @@ class Annotation:
         :param dst: the new AST (the result of a simplification)
         :return: the annotation that will be applied to `dst`
         """
-        return self
+        if self.relocatable:
+            return self
+        raise ClaripyOperationError("Annotation is not relocatable")
+
 
 #
 # Some built-in annotations
 #
 
+
 class SimplificationAvoidanceAnnotation(Annotation):
+    """SimplificationAvoidanceAnnotation is an annotation that prevents simplification of an AST."""
+
     @property
     def eliminatable(self):
         return False
@@ -61,3 +77,69 @@ class SimplificationAvoidanceAnnotation(Annotation):
     @property
     def relocatable(self):
         return False
+
+
+class StridedIntervalAnnotation(SimplificationAvoidanceAnnotation):
+    """StridedIntervalAnnotation allows annotating a BVS to represent a strided interval."""
+
+    stride: int
+    lower_bound: int
+    upper_bound: int
+
+    def __init__(self, stride: int, lower_bound: int, upper_bound: int):
+        self.stride = stride
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
+
+    def __hash__(self):
+        return hash((self.stride, self.lower_bound, self.upper_bound))
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, StridedIntervalAnnotation)
+            and self.stride == other.stride
+            and self.lower_bound == other.lower_bound
+            and self.upper_bound == other.upper_bound
+        )
+
+    def __repr__(self):
+        return f"<StridedIntervalAnnotation {self.stride}:{self.lower_bound} - {self.upper_bound}>"
+
+
+class RegionAnnotation(SimplificationAvoidanceAnnotation):
+    """
+    Use RegionAnnotation to annotate ASTs. Normally, an AST annotated by
+    RegionAnnotations is treated as a ValueSet.
+    """
+
+    def __init__(self, region_id, region_base_addr):
+        self.region_id = region_id
+        self.region_base_addr = region_base_addr
+
+    #
+    # Overriding base methods
+    #
+
+    def __hash__(self):
+        return hash((self.region_id, self.region_base_addr))
+
+    def __repr__(self):
+        return f"<RegionAnnotation {self.region_id}@{self.region_base_addr:#08x}>"
+
+
+class UninitializedAnnotation(Annotation):
+    """
+    Use UninitializedAnnotation to annotate ASTs that are uninitialized.
+    """
+
+    eliminatable = False
+    relocatable = True
+
+    def __hash__(self):
+        return hash("uninitialized")
+
+    def __eq__(self, other):
+        return isinstance(other, UninitializedAnnotation)
+
+    def __repr__(self):
+        return "<UninitializedAnnotation>"
